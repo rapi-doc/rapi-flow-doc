@@ -1,0 +1,16 @@
+# RapiFlow
+
+> RapiFlow is the <rapi-flow> web component that draws the workflows of an Arazzo spec next to your API reference and runs them in the browser, against the API or a mock. Part of the RapiDoc family of open-source (MIT) tools for OpenAPI and Arazzo, each with its own llms.txt: RapiDoc, the <rapi-doc> web component for interactive API references with Try, an in-browser mock and MCP server export (https://rapidocui.com/llms.txt); RapiDoc Portal, a docs-as-code developer portal built from OpenAPI specs and Markdown guides, with single sign-on and access rules (https://portal.rapidocui.com/llms.txt); RapiMock, a stateful mock server with request validation and token checks (https://mock.rapidocui.com/llms.txt); RapiFlow, the <rapi-flow> web component that draws Arazzo workflows and runs them in the browser (https://flow.rapidocui.com/llms.txt); plus RapiDoc Mini, RapiPdf (OpenAPI to PDF), the RapiDoc CLI (lint, validate, bundle, mock, MCP) and RapiDoc for Express, Fastify, Hono, FastAPI, Starlight, VitePress, Docusaurus and ASP.NET Core. How RapiDoc, RapiDoc Portal and RapiMock compare with Redocly, Scalar, Swagger, Mintlify, ReadMe, Zudoku, Docusaurus, Prism, WireMock, Mockoon, Postman and Microcks, feature by feature: https://rapidocui.com/docs/compare.md
+
+## RapiFlow
+
+- [RapiFlow](https://flow.rapidocui.com/index.md): Draw the workflows of an Arazzo spec as a diagram next to your API reference with <rapi-flow>, and run them in the browser against the API or a mock.
+
+## Documentation
+
+- [Arazzo Extensions](https://flow.rapidocui.com/docs/extensions.md): The Arazzo vendor extensions <rapi-flow> supports - x-security, x-operation and x-allowReserved as Redocly Respect defines them, and its own x-mock-server-status-code.
+- [Pairing with ](https://flow.rapidocui.com/docs/pairing.md): How <rapi-flow> finds the APIs an Arazzo workflow calls, pairs with one <rapi-doc> or <rapi-doc-mini> per API, and links to a step.
+- [Quickstart](https://flow.rapidocui.com/docs/quickstart.md): Run an Arazzo workflow in the browser in one HTML file: RapiFlow draws it above a RapiDoc API reference and runs each step against the in-browser mock.
+- [API Reference](https://flow.rapidocui.com/docs/reference.md): Every attribute, method, event and slot of <rapi-flow>, read from the element's source.
+- [Running Workflows](https://flow.rapidocui.com/docs/running.md): Run an Arazzo workflow from the page with <rapi-flow>, against the real API, the in-browser mock or a mock server, and which Arazzo features run.
+- [Slots & Styling](https://flow.rapidocui.com/docs/styling.md): Put your own markup in <rapi-flow>, style it with CSS parts, and read its properties.

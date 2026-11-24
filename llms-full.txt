@@ -1,0 +1,436 @@
+# RapiFlow
+
+> Draw the workflows of an Arazzo spec as a diagram next to your API reference with <rapi-flow>, and run them in the browser against the API or a mock.
+
+An API reference shows operations one at a time. Integrators also need the order: find a pet, check it, order it, read the order back. [Arazzo](https://spec.openapis.org/arazzo/latest.html) describes those sequences, and `<rapi-flow>` draws them: one box per step, linked to its operation, the values each step passes on, and the success and failure branches. Readers can run a workflow from the page and watch each step answer.
+
+> **Tip: See it running**
+> The [RapiFlow page](https://rapidocui.com/rapi-flow/) runs a workflow against the in-browser mock, the [rapi-flow example](https://rapidocui.com/examples/arazzo) puts the diagram next to a full API reference, and the [multi-API example](https://rapidocui.com/examples/arazzo-multi) pairs it with one `<rapi-doc-mini>` per API.
+
+## Load it
+
+`<rapi-flow>` is a separate bundle, `rapidoc-flow-min.js` (`import 'rapidoc/flow'` with a bundler), so pages that only use `<rapi-doc>` don't download it. It carries its own copy of Lit and the Arazzo runtime; `rapidoc-min.js` carries no Arazzo code. The [Quickstart](/docs/quickstart/) puts both on a page and runs a workflow against the in-browser mock.
+
+## Standalone or paired
+
+- **Paired** (`for="<id>"`): the element uses that `<rapi-doc>`'s OpenAPI spec, its selected server and the credentials entered in its Authentication section. Clicking a step scrolls the reference to the step's operation. If the `<rapi-doc>` has `mock-server="true"`, runs go to the in-browser mock. A workflow that calls several APIs can be paired with one element per API (see [one element per API](/docs/pairing/#one-element-per-api)).
+- **Standalone**: the element loads each OpenAPI source of the Arazzo spec itself (`spec-url` replaces the first one's URL) and shows its own credentials fields, one per security scheme of the loaded specs. Values typed there stay in the page. A paired element's sources get no fields: it has its own.
+
+## In a developer portal
+
+`@rapidoc/portal` draws workflows in docs pages with the `{% workflow document="…" id="…" %}` Markdoc tag: the diagram is rendered as static SVG at build time, and `rapidoc-flow-min.js` loads only when a reader clicks **Run workflow**. The portal build also turns each workflow into an MCP tool for `rapidoc serve`'s `/mcp` endpoint.
+
+## Learn more
+
+<CardGrid>
+  <LinkCard title="Quickstart" href="/docs/quickstart/" description="One HTML file: a workflow drawn next to its reference, run against the in-browser mock." />
+  <LinkCard title="Pairing with <rapi-doc>" href="/docs/pairing/" description="API sources, one element per API, and links to a step." />
+  <LinkCard title="Running workflows" href="/docs/running/" description="Run a workflow from the page, against the API or a mock, and what runs." />
+  <LinkCard title="Arazzo extensions" href="/docs/extensions/" description="x-security, x-operation and x-allowReserved." />
+  <LinkCard title="API Reference" href="/docs/reference/" description="Every attribute, method and event, read from the element's source." />
+  <LinkCard title="Slots & Styling" href="/docs/styling/" description="Your own header and footer, CSS parts and properties." />
+</CardGrid>
+
+Source: https://flow.rapidocui.com/
+
+---
+
+# Arazzo Extensions
+
+> The Arazzo vendor extensions <rapi-flow> supports - x-security, x-operation and x-allowReserved as Redocly Respect defines them, and its own x-mock-server-status-code.
+
+`<rapi-flow>` supports three vendor extensions of Arazzo, as [Redocly Respect](https://redocly.com/docs/respect/extensions/) defines them. They work in runs, in the diagram and in the [MCP export](https://rapidocui.com/docs/mcp/server/#workflows-as-tools). A fourth, `x-mock-server-status-code`, is RapiDoc's own and only fills the run panel's mock table.
+
+| Extension | On | What it does |
+| :--- | :--- | :--- |
+| [`x-security`](/docs/extensions/#credentials-in-the-workflow-x-security) | workflow, step | The credentials a request sends. |
+| [`x-operation`](/docs/extensions/#calls-outside-the-api-sources-x-operation) | step | Calls a URL outside the API sources. |
+| [`x-allowReserved`](#reserved-characters-in-query-values-x-allowreserved) | step parameter | Sends reserved characters in a query value unencoded. |
+| [`x-mock-server-status-code`](#mock-status-codes-x-mock-server-status-code) | step | The status codes the mock answers this step with in a run, prefilled in **Mock Response Status**. |
+
+## Credentials in the workflow (`x-security`)
+
+`<rapi-flow>` supports the `x-security` extension of [Redocly Respect](https://redocly.com/docs/respect/extensions/x-security), so an Arazzo spec can say which credentials each request sends instead of relying on what the reader typed into the Authentication section. Put it on a step, or on the workflow for every step:
+
+```yaml
+workflows:
+  - workflowId: adoptPet
+    inputs:
+      type: object
+      properties:
+        apiKey: { type: string, format: password }
+        token: { type: string, format: password }
+    x-security:                      # every step
+      - scheme: { type: http, scheme: bearer }
+        values: { token: $inputs.token }
+    steps:
+      - stepId: checkPet
+        operationId: getPetById
+        x-security:                  # this step only
+          - schemeName: api_key      # a scheme of the step's OpenAPI source
+            values: { apiKey: $inputs.apiKey }
+```
+
+- Each entry has either `schemeName` (a scheme in the step's source's `components.securitySchemes`) or an inline `scheme`, plus `values`: `apiKey` for an API key (`in: header`, `query` or `cookie`), `username` and `password` for HTTP Basic, `token` for HTTP Bearer, OAuth 2 and OpenID Connect.
+- Values are usually `$inputs.<name>`, or `$steps.<id>.outputs.<name>` for a token an earlier step returned. An input that is not given sends nothing for that entry.
+- The workflow's entries are sent first, then the step's, after the credentials entered in the page. Where two set the same header, query parameter or cookie, the later one wins, so the step's override the workflow's.
+- Inputs with `format: password` get a password field in the run panel, and the log shows them as `••••••`. The diagram lists each step's credentials under **Security** with the scheme, and never shows a value written into the file itself.
+- HTTP Digest is not supported: a browser cannot read the API's challenge across origins. A workflow that uses it is drawn, with a note that it cannot run.
+
+In an [MCP export](https://rapidocui.com/docs/mcp/server/#workflows-as-tools), password inputs are arguments of the workflow's tool, so the agent supplies them. To keep a secret away from the agent, leave it out of `x-security` and set the scheme's environment variable instead.
+
+## Calls outside the API sources (`x-operation`)
+
+A step can call an endpoint that no source description describes, such as a file download link an earlier step returned, or a third-party API, with the `x-operation` extension of [Redocly Respect](https://redocly.com/docs/respect/extensions/x-operation). It takes the place of `operationId`:
+
+```yaml
+steps:
+  - stepId: upload
+    operationId: uploadFile
+    outputs:
+      fileUrl: $response.body#/url
+  - stepId: download
+    x-operation:
+      url: $steps.upload.outputs.fileUrl   # or an absolute URL: https://cdn.example.com/files/{id}
+      method: get
+    successCriteria:
+      - condition: $statusCode == 200
+```
+
+- `url` is an absolute `http` or `https` URL, or a runtime expression; `{$inputs.x}` can be interpolated into a URL too. `method` is any HTTP method, in any case.
+- `parameters` work as for other steps: query, header and cookie values are added, and a path parameter fills its `{name}` in the URL. `requestBody`, `successCriteria`, actions and `outputs` are the same.
+- No source credentials are sent, since the URL belongs to no source. To send some, add [`x-security`](/docs/extensions/#credentials-in-the-workflow-x-security) with an inline `scheme` (`schemeName` has no source to look in).
+- The diagram draws the step with a dashed border, its method and URL, and an **external** tag. A URL computed from an earlier step lists that step under **URL**, like any value passed between steps. The step does not open anything in the reference.
+- Runs call the URL from the reader's browser, so that server must allow cross-origin requests from the docs site; the log says so when the request fails. A mock does not answer these steps.
+
+In an [MCP export](https://rapidocui.com/docs/mcp/server/#workflows-as-tools), the server makes the request. A URL written into the Arazzo spec is always called; a URL computed at run time (from an input or a response) is called only on a host the workflow names (its API sources' servers, or another step's written-out URL), so an agent or an API can't send the server to an address of its choosing. List more hosts in `MCP_EXTERNAL_HOSTS` (comma-separated, `*` for any), which the exported server, `rapidoc mcp serve` and `rapidoc serve` all read, or with the runtime's `externalHosts` option.
+
+## Reserved characters in query values (`x-allowReserved`)
+
+Query values are percent-encoded, so `https://a.example/x` is sent as `https%3A%2F%2Fa.example%2Fx`. When the API expects the value as is (a URL, a filter expression), set `x-allowReserved: true` on the step's parameter, the Arazzo counterpart of OpenAPI's `allowReserved`, as in [Redocly Respect](https://redocly.com/docs/respect/extensions/x-allow-reserved):
+
+```yaml
+parameters:
+  - name: filter
+    in: query
+    value: https://example.com/path/to;x,y
+    x-allowReserved: true        # ?filter=https://example.com/path/to;x,y
+```
+
+The reserved characters `: / ? [ ] @ ! $ & ' ( ) * + , ; =` are then sent unencoded; spaces and other characters are still encoded, and so is `#`, which would end the URL's query. A query parameter with `allowReserved: true` in the OpenAPI document is sent the same way without the extension; `x-allowReserved: false` turns that off for one step.
+
+## Mock status codes (`x-mock-server-status-code`)
+
+A workflow that shows a failure path, a retry or a `goto`, can carry the scenario it needs. Put the codes on the step, in the syntax of the [`mock-server-status-code`](https://rapidocui.com/docs/rapidoc/mocking/in-browser/#simulating-errors) attribute:
+
+```yaml
+steps:
+  - stepId: checkPet
+    operationId: getPetById
+    x-mock-server-status-code: "cycle:503,503,200"   # fails twice, then succeeds
+  - stepId: placeOrder
+    operationId: placeOrder
+    x-mock-server-status-code: "random:200,500"
+```
+
+The value fills the step's row of the run panel's [Mock Response Status](/docs/running/#the-in-browser-mock) table, where the reader can change it before a run: codes without a prefix are used in turn, one per attempt; `random:` picks one at random. A number (`404`) or a list (`[503, 200]`) works too. It only applies when the run is mocked (a paired element with `mock-server`, or `server-is-mock`); a real server, and the MCP export, ignore it. Arazzo allows `x-` extensions on steps, so the file stays valid for other tools.
+
+Source: https://flow.rapidocui.com/docs/extensions/
+
+---
+
+# Pairing with 
+
+> How <rapi-flow> finds the APIs an Arazzo workflow calls, pairs with one <rapi-doc> or <rapi-doc-mini> per API, and links to a step.
+
+`<rapi-flow>` reads an Arazzo spec and draws its workflows. It works on its own, or takes each API's OpenAPI spec, server, credentials and mock from a `<rapi-doc>` or `<rapi-doc-mini>` on the page (see [Standalone or paired](/#standalone-or-paired)).
+
+## API sources
+
+An Arazzo spec names the APIs its steps call in `sourceDescriptions`. `<rapi-flow>` lists them in the card above the diagram, under the Arazzo spec's URL (or the box that loads one): **API sources**, with each one's name and URL (and its type when it is not `openapi`, such as another Arazzo spec). The diagram's first box then holds the workflow's **Inputs** alone. A diagram drawn without the element (the portal's `{% workflow %}` tag, `renderArazzoWorkflow`) lists them at the top of its first box instead, unless `showSources: false` is passed.
+
+A document can name several sources (Rapid Parcels' `ship-a-parcel` uses `rates`, `shipments` and `tracking`). Then:
+
+- **Loading**: `<rapi-flow>` fetches every `openapi` source, its URL taken relative to the Arazzo spec. `arazzo` sources (other Arazzo specs) are listed but not loaded. A source that fails to load is listed under the diagram, and the steps on it show their `operationId` with "(not found)".
+- **Finding a step's operation**: an `operationId` is looked up in the sources in order, and the first that has it wins. When two APIs share an id, qualify it: `$sourceDescriptions.shipments.createShipment`. An `operationPath` (`{$sourceDescriptions.<name>.url}#/paths/...`) names its source.
+- **A single paired `<rapi-doc>`** shows one API: the **first** source (or the one whose OpenAPI spec it shows). `<rapi-flow>` takes that source from it (its processed OpenAPI spec, its selected server, its credentials) and loads the others itself. Clicking a step on another source does not scroll the reference, which does not have that operation. To show every API, pair one element per source (next section).
+- **Runs**: each source's requests go to the server selected in its paired element, else the first server of its own OpenAPI spec; `server-url` replaces the first source's. Credentials apply by security scheme id, across sources. An element's in-browser mock answers the steps on its own source; steps on a source with no paired element, or whose element does not mock, go to their servers. With `server-is-mock="true"`, those requests carry `Prefer: code=`, so a mock server that serves all the APIs (`rapidoc mock` serves a portal's APIs side by side) answers them.
+- **MCP export**: one manifest source per loaded API; a workflow tool's steps call each one at its own server.
+
+## One element per API
+
+`for` takes several ids separated by spaces, one element per OpenAPI source. Each element supplies its source's OpenAPI spec, server, credentials and mock, and clicking a step shows its operation in the element of its source. `<rapi-doc-mini>` suits this best: `<rapi-flow>` sets its `filter-operations` to the shown workflow's operations of its API, in step order, and updates it when the reader picks another workflow, so each mini lists just the calls the workflow makes.
+
+```html
+<rapi-flow arazzo-url="/workflows/ship-a-parcel.arazzo.yaml" allow-arazzo-url-load="true"
+           for="rates-api shipments-api tracking-api"></rapi-flow>
+
+<rapi-doc-mini id="rates-api" arazzo-source="rates" mock-server="true"></rapi-doc-mini>
+<rapi-doc-mini id="shipments-api" arazzo-source="shipments" mock-server="true"></rapi-doc-mini>
+<rapi-doc-mini id="tracking-api" arazzo-source="tracking" mock-server="true"></rapi-doc-mini>
+```
+
+- **Which element goes with which source**: the source its `arazzo-source` attribute names; else the source whose URL it has loaded (`spec-url`, resolved against the page, equal to the source URL resolved against the Arazzo spec); else the next source not taken, in document order. An element named for a source the document does not have is left alone, so a page can list elements for several Arazzo specs in one `for`.
+- **Loading**: with `allow-arazzo-url-load="true"`, `<rapi-flow>` loads each source into its element, so the elements need no `spec-url`: a `<rapi-doc>` loads it at once, a mini once its filter is set, so it is fetched filtered from the start. `<rapi-flow>` loads a mini's source itself too, to resolve every workflow's steps; a `<rapi-doc>`'s source is fetched only by the `<rapi-doc>`. Without the box, give each element its `spec-url`.
+- **Changing `for`**: `<rapi-flow>` pairs the elements again without loading the Arazzo spec again. Elements are paired after `flow-loaded` fires, so a `flow-loaded` listener can create the elements for the document's sources and set `for`. The [multi-API example](https://rapidocui.com/examples/arazzo-multi) writes its three minis in the page instead, each with `arazzo-source` and `spec-url`, for Rapid Parcels' `ship-a-parcel`.
+
+## Links to a step
+
+With `update-route="true"`, picking a workflow or clicking a step puts them in the address as query parameters:
+
+```text
+/docs/shipping?workflow=shipParcel&step=label
+```
+
+Opening that link shows the `shipParcel` workflow, selects `label`, scrolls its box into view and shows its operation in the paired element, once that element has loaded its OpenAPI spec. Unknown ids are ignored.
+
+- **Query parameters, not the hash**: `<rapi-doc>` keeps the hash (`#get-/pets`) for its operations and rewrites it as the reader scrolls, so the two never overwrite each other. A link can carry both: `?workflow=shipParcel&step=label#get-/shipments/{shipmentId}/label`.
+- **No history entries**: the address is replaced, as `<rapi-doc>` does, so Back leaves the page instead of stepping through clicks.
+- **Routers**: `history.state` is kept, so a single-page app's router (Vue Router, React Router) keeps its data. In a router's history mode both elements work as on a plain page. A hash-mode router owns the hash: set `update-route="false"` on `<rapi-doc>` there; `<rapi-flow>`'s parameters still work.
+- **One element per page**: the parameter names are fixed, so set it on one `<rapi-flow>` only.
+- A document loaded from the URL box drops the old step and shows its first workflow.
+
+Source: https://flow.rapidocui.com/docs/pairing/
+
+---
+
+# Quickstart
+
+> Run an Arazzo workflow in the browser in one HTML file: RapiFlow draws it above a RapiDoc API reference and runs each step against the in-browser mock.
+
+At the end, a workflow is drawn above its API reference, and you run it against a mock that answers from the OpenAPI spec. You need a browser and an internet connection: the page loads RapiDoc and RapiFlow from unpkg and the sample files from rapidocui.com, so you can open it directly from disk.
+
+<Steps>
+
+1. **Create an HTML file** that loads RapiDoc and RapiFlow, and points them at the Petstore's OpenAPI spec and its Arazzo spec (an [Arazzo spec](https://spec.openapis.org/arazzo/latest.html) describes multi-step workflows across the operations of OpenAPI specs):
+
+   ```html title="index.html"
+   <!doctype html>
+   <html lang="en">
+     <head>
+       <meta charset="utf-8" />
+       <title>Petstore workflows</title>
+       <script type="module" src="https://unpkg.com/rapidoc/dist/rapidoc-min.js"></script>
+       <script type="module" src="https://unpkg.com/rapidoc/dist/rapidoc-flow-min.js"></script>
+       <style>
+         rapi-doc { height: 100vh; }
+       </style>
+     </head>
+     <body>
+       <rapi-flow
+         arazzo-url="https://rapidocui.com/specs/petstore.arazzo.yaml"
+         workflow-id="adoptPet"
+         for="petstore"
+       ></rapi-flow>
+
+       <rapi-doc
+         id="petstore"
+         spec-url="https://rapidocui.com/specs/petstore.yaml"
+         mock-server="true"
+       ></rapi-doc>
+     </body>
+   </html>
+   ```
+
+   `for="petstore"` pairs the two: RapiFlow takes the OpenAPI spec, the server and the credentials from the `<rapi-doc>` with that id. `mock-server="true"` on that element makes the in-browser mock answer the workflow's requests.
+
+2. **Open it in a browser.** The `adoptPet` workflow is drawn as one box per step: find an available pet, check it, order it, read the order back. Each box shows the operation it calls, the values it passes on and where it goes on success or failure. The picker at the top of `<rapi-flow>` switches between the file's four workflows; `workflow-id` picks the one shown first. Click a step, then scroll down: the reference below shows its operation.
+
+3. **Press RUN WORKFLOW (Mock).** Leave the inputs as they are. The **Execution Log** adds a row for each step: the step, its method and URL, `HTTP 200` and ✓. Open a row to see the response (and, for `placeOrder`, the request body). At the end, the workflow's outputs appear: the pet's name, and the order's id and status.
+
+4. **Make a step retry.** Open **Mock Response Status**, type `503, 200` in the `placeOrder` row and run again. The first attempt at `placeOrder` gets a 503, and its row shows ✗ and `→ retry`. The step's `retry` action waits two seconds, and the second attempt gets a 200: its row shows ✓, and opening it shows `attempt 2`.
+
+5. **End the workflow early.** Clear the `placeOrder` row, type `404` in the **Every step** row and run once more: `findAvailable` fails, and its `onFailure` action ends the workflow there. Its row shows ✗ and opens to show the failed check and `→ end`, and an error saying the workflow failed at `findAvailable` takes the place of the outputs.
+
+</Steps>
+
+## Your own files
+
+- Set `spec-url` on `<rapi-doc>` to your OpenAPI spec.
+- Set `arazzo-url` on `<rapi-flow>` to an Arazzo spec that lists that OpenAPI spec in its `sourceDescriptions`, the OpenAPI specs the workflow calls. See [Pairing](/docs/pairing/).
+- Remove `workflow-id` to show the first workflow.
+- Serve the page and both files from a local web server: a page opened from disk can't read files next to it. Files on another domain need a server that allows cross-origin requests.
+
+> **Tip: Against the real API**
+> Remove `mock-server="true"` and the same run calls the API at the OpenAPI spec's server, from the browser, with the credentials entered in the reference's Authentication section. That API must allow cross-origin requests from your page.
+
+## With a bundler
+
+Install `rapidoc` and replace the two script tags with these imports:
+
+```bash frame="terminal" title="terminal"
+npm install rapidoc
+```
+
+```javascript
+import 'rapidoc';
+import 'rapidoc/flow';
+```
+
+## Next steps
+
+- [Pairing with `<rapi-doc>`](/docs/pairing/): workflows that call several APIs, one element per API, and links to a step.
+- [Running Workflows](/docs/running/): what runs, the mock's status codes, and running against [RapiMock](https://mock.rapidocui.com/).
+- [Arazzo Extensions](/docs/extensions/): credentials in the workflow, calls outside the API sources.
+- [Slots & Styling](/docs/styling/): your own header and footer, CSS parts and properties.
+- [API Reference](/docs/reference/): every attribute, method, event and slot of `<rapi-flow>`.
+- [RapiFlow feature page](https://rapidocui.com/rapi-flow/): a live demo.
+
+Source: https://flow.rapidocui.com/docs/quickstart/
+
+---
+
+# API Reference
+
+> Every attribute, method, event and slot of <rapi-flow>, read from the element's source.
+
+Everything `<rapi-flow>` takes and offers, read from the element's own source. How to use it is in the [Quickstart](/docs/quickstart/), [Pairing with `<rapi-doc>`](/docs/pairing/), [Running Workflows](/docs/running/) and [Slots & Styling](/docs/styling/). It ships in its own bundle, `rapidoc-flow-min.js`.
+
+<ElementReference tag="rapi-flow" section="filter" />
+
+## Attributes
+
+Set on the element in HTML, or changed at runtime with `setAttribute`.
+
+<ElementReference tag="rapi-flow" section="attributes" />
+
+## Methods
+
+<ElementReference tag="rapi-flow" section="methods" />
+
+## Events
+
+All events bubble and cross the shadow boundary.
+
+```js
+const flow = document.querySelector('rapi-flow');
+
+// A step was clicked: show its operation somewhere else on the page
+flow.addEventListener('step-click', (e) => {
+  console.log(e.detail.workflowId, e.detail.stepId, e.detail.operation);
+});
+
+// A run finished: one trace entry per step attempt
+flow.addEventListener('workflow-run', (e) => {
+  console.table(e.detail.trace);
+});
+```
+
+<ElementReference tag="rapi-flow" section="events" />
+
+## Slots
+
+<ElementReference tag="rapi-flow" section="slots" />
+
+Source: https://flow.rapidocui.com/docs/reference/
+
+---
+
+# Running Workflows
+
+> Run an Arazzo workflow from the page with <rapi-flow>, against the real API, the in-browser mock or a mock server, and which Arazzo features run.
+
+## Running a workflow
+
+The run panel under the diagram has the workflow's inputs (filled with their defaults), the credentials fields when the element is standalone, and **Run workflow**. While it runs, the step whose request is in flight is highlighted; each finished step adds a row to the **Execution Log**: its number, step, method and URL, HTTP status and ✓ or ✗, and it opens to show the failed check, the request and the response. **Single line** keeps each row on one line with the URL shortened; **Multiline** lets rows wrap. The workflow's outputs appear as a table at the end.
+
+Runs call the API from the reader's browser, as **Try** does, so a real API must allow cross-origin requests from the docs site.
+
+## Running against a mock
+
+A workflow is easiest to show and test before the API exists, or without touching real data.
+
+### The in-browser mock
+
+Turn on [`mock-server`](https://rapidocui.com/docs/rapidoc/mocking/in-browser/) on the paired elements. Every request of the run to their APIs is answered in the page from the OpenAPI spec's examples and schemas; the Execution Log's heading reads "Execution Log (mocked responses)" when every response was mocked; when only some were (a source with no mocking element), those entries say "mocked response" when opened. The mock answers 200 unless told otherwise: for APIs that answer 201 or 204, set `mock-server-status-code=""` on the element, so each operation gets its first 2xx response and the workflow's `$statusCode == 201` checks pass.
+
+```html
+<rapi-flow arazzo-url="/specs/petstore.arazzo.yaml" for="thedoc"></rapi-flow>
+<rapi-doc id="thedoc" spec-url="/specs/petstore.yaml" mock-server="true"></rapi-doc>
+```
+
+The run panel then has a **Mock Response Status** table: the status codes the mock answers with during that run, one row per step and an **Every step** row for the others.
+
+- Empty: the element's own setting (`mock-server-status-code`: 200 by default, the operation's first 2xx response when it is empty).
+- One code in the **Every step** row, such as `404`: every request of the run gets it. In the sample `adoptPet` workflow, a 404 on the first step takes its `onFailure` branch and ends the run.
+- A code on one step, such as `503, 200` on `placeOrder`: that step's first attempt gets 503 and its retry gets 200, while the other steps succeed. With several codes, a step takes the next code on each attempt, in turn; `random:200, 500` picks one at random for each attempt instead.
+- A step's [`x-mock-server-status-code`](/docs/extensions/#mock-status-codes-x-mock-server-status-code) in the Arazzo spec fills its row, so a workflow can ship with the failure scenario it demonstrates.
+
+The table sets each paired element's mock for that run only, per operation of its API, and puts the previous setting back afterwards. Pages can fill it from a script through the `statusCodes` property: `flow.statusCodes = { "*": "200", placeOrder: "503, 200" }`. A key set there, even to `""`, wins over the step's extension.
+
+### A mock server
+
+To run against a mock that behaves more like the real API (request validation, generated data, OAuth scope checks), start [`rapidoc mock`](https://mock.rapidocui.com/docs/getting-started/quickstart/) and point the run at it:
+
+```html
+<rapi-flow arazzo-url="/specs/petstore.arazzo.yaml" spec-url="/specs/petstore.yaml"
+           server-url="http://localhost:4010/petstore" server-is-mock="true"></rapi-flow>
+```
+
+Or list the mock as a server in the OpenAPI spec and pick it in the paired element's server list. With OAuth, sign in through **Authorize** in `<rapi-doc>`, or paste a token into the standalone credentials field; the mock checks it like the real API would.
+
+With `server-is-mock="true"`, the same **Mock Response Status** table works here: each step's codes are sent as `Prefer: code=<status>`, which `rapidoc mock` honors. Without it, and with no paired element mocking, the table is not shown, since a real API ignores the header.
+
+## What runs
+
+| Arazzo feature | Runs |
+| :--- | :--- |
+| `inputs`, `outputs`, step `outputs` | Yes |
+| `$inputs`, `$steps.<id>.outputs`, `$response.body#/pointer`, `$response.header`, `$statusCode` | Yes |
+| `successCriteria` with simple conditions (`==`, `!=`, `<`, `>`, `&&`, `||`) | Yes |
+| `onSuccess` / `onFailure`: `end`, `goto`, `retry` with `retryAfter` and `retryLimit` | Yes |
+| `requestBody` with payload and replacements | Yes |
+| `regex`, `jsonpath` and `xpath` criteria | Not yet |
+| [`x-security`](/docs/extensions/#credentials-in-the-workflow-x-security) on a workflow or step: API key, HTTP Basic, bearer | Yes |
+| `x-security` with HTTP Digest | No |
+| `x-allowReserved` on a step's query parameter, and the OpenAPI parameter's `allowReserved` | Yes |
+| [`x-operation`](/docs/extensions/#calls-outside-the-api-sources-x-operation): a step that calls a URL outside the sources | Yes |
+| Steps that call another workflow, AsyncAPI sources | Not yet |
+
+A step without `successCriteria` succeeds on a 2xx status; the first matching action runs; a run stops after 1,000 steps. A workflow that uses something not supported yet is still drawn, with a note that explains why it can't run.
+
+Source: https://flow.rapidocui.com/docs/running/
+
+---
+
+# Slots & Styling
+
+> Put your own markup in <rapi-flow>, style it with CSS parts, and read its properties.
+
+Every attribute, method and event of `<rapi-flow>` is on its [API reference](/docs/reference/) page, read from the element's source. All its events bubble and cross the shadow boundary (`composed`).
+
+## Slots
+
+Put your own markup at the top or bottom of the element with `slot="header"` or `slot="footer"`: a logo, a title, a server switch, links. It stays in the page's DOM, so the page's CSS styles it and its scripts find it, and it scrolls with the diagram. Its spacing is yours: the element adds none around it.
+
+```html
+<rapi-flow arazzo-url="/workflows/ship-a-parcel.arazzo.yaml" for="thedoc">
+  <div slot="header">
+    <img src="/logo.svg" alt="Rapid Parcels" height="28">
+  </div>
+  <p slot="footer">Questions? <a href="/support">Contact support</a>.</p>
+</rapi-flow>
+```
+
+| Slot | Where |
+| :--- | :--- |
+| `header` | At the top, above the card with the Arazzo spec's URL and API sources. |
+| `footer` | At the bottom, below the run panel. |
+
+The [rapi-flow example](https://rapidocui.com/examples/arazzo) puts the `<rapi-flow>` logo and its Real / Mock server switch in the header slot; the [multi-API example](https://rapidocui.com/examples/arazzo-multi), the Rapid Parcels logo.
+
+## Styling
+
+`theme` and `color-scheme` work as on `<rapi-doc>`, and the element reads the same [CSS custom properties](https://rapidocui.com/docs/rapidoc/theming/overview/). Its CSS parts: `mcp-export`, `document` (the card with the URL and the API sources), `sources`, `url`, `url-form`, `url-input`, `url-load`, `url-error`, `header`, `title`, `select`, `description`, `view-toggle`, `diagram`, `run`, `run-inputs`, `run-button`, `run-stop`, `log-toggle` (the Execution Log's Single line / Multiline switch), `message`, `problems`.
+
+```css
+rapi-flow::part(diagram) {
+  max-height: 32rem;
+}
+```
+
+## Properties
+
+The element also exposes `arazzoDocument` (the parsed document), `workflowRuntimeSource`, which a paired `<rapi-doc>` uses to add workflow tools to its [MCP export](https://rapidocui.com/docs/mcp/server/#workflows-as-tools), and the `statusCodes` property that fills the Mock Response Status table (see [Running against a mock](/docs/running/#running-against-a-mock)).
+
+Source: https://flow.rapidocui.com/docs/styling/
